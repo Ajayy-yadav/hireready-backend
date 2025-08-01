@@ -7,6 +7,13 @@ import { PrismaService } from 'src/prisma/prisma.service';
 export class UserService {
   constructor(private readonly prisma: PrismaService) {}
   create(createUserDto: CreateUserDto) {
+    this.prisma.user.findUnique({
+      where: { email: createUserDto.email },
+    }).then(user => {
+      if (user) {
+        throw new Error('User with this email already exists');
+      }
+    });
     return this.prisma.user.create({
       data: createUserDto,
     });
