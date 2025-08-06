@@ -16,6 +16,7 @@ export class UserController {
       example1: {
         summary: 'Sample user',
         value: {
+            id: '12345',
           username: 'john_doe',
           email: 'john@example.com',
           currentRole: 'Developer',
