@@ -2,6 +2,7 @@
 import * as bodyParser from 'body-parser';
 import { NestFactory } from '@nestjs/core';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
+import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
@@ -24,7 +25,11 @@ const document = SwaggerModule.createDocument(app, config);
     credentials: true,
     allowedHeaders: ['Content-Type', 'Authorization', 'cookie'],
   });
-  // app.useGlobalPipes(new ValidationPipe());
+  app.useGlobalPipes(new ValidationPipe({
+    whitelist: true,
+    transform: true,
+    forbidNonWhitelisted: true,
+  }));
 
   await app.listen(process.env.PORT!, async () => {
     console.log(`Application is running on: ${await app.getUrl()}`);

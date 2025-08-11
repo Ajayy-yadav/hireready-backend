@@ -108,6 +108,11 @@ async uploadImage(
   @Post('upload-resume-base64')
   @ApiOperation({ summary: 'Upload resume as base64 to Supabase Storage' })
   async uploadResumeBase64(@Body() uploadDto: UploadBase64Dto) {
+    // Check if fileBase64 exists in the request body
+    if (!uploadDto || !uploadDto.fileBase64) {
+      throw new BadRequestException('Missing required field: fileBase64');
+    }
+    
     // Extract base64 data - remove the prefix if it exists (data:application/pdf;base64,)
     let base64Data = uploadDto.fileBase64;
     if (base64Data.includes(',')) {
@@ -144,6 +149,11 @@ async uploadImage(
   @Post('upload-image-base64')
   @ApiOperation({ summary: 'Upload image as base64 to Supabase Storage' })
   async uploadImageBase64(@Body() uploadDto: UploadBase64Dto) {
+    // Check if fileBase64 exists in the request body
+    if (!uploadDto || !uploadDto.fileBase64) {
+      throw new BadRequestException('Missing required field: fileBase64');
+    }
+    
     // Extract base64 data - remove the prefix if it exists (data:image/jpeg;base64,)
     let base64Data = uploadDto.fileBase64;
     if (base64Data.includes(',')) {
