@@ -38,19 +38,31 @@ async uploadResume(
     @UploadedFile() file: Multer.File,
     @Body('userId') userId: string
 ) {
+    if (!file) {
+        throw new BadRequestException('File is required');
+    }
+
+    if (!userId) {
+        throw new BadRequestException('User ID is required');
+    }
+
     // Validate file type (allow only PDF and DOC/DOCX)
     const allowedMimeTypes = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
     
     if (!allowedMimeTypes.includes(file.mimetype)) {
-        throw new Error('Only PDF and DOC/DOCX files are allowed');
+        throw new BadRequestException('Only PDF and DOC/DOCX files are allowed');
     }
     
-    const bucket = 'resumes';
-    const path = `${userId}/${Date.now()}_${file.originalname}`;
-    await this.storageService.uploadFile(bucket, path, file.buffer, file.mimetype);
-    const publicUrl = this.storageService.getPublicUrl(bucket, path);
-    await this.userService.updateResumeUrl(userId, publicUrl);
-    return { url: publicUrl, filename: file.originalname, mimetype: file.mimetype };
+    try {
+        const bucket = 'resumes';
+        const path = `${userId}/${Date.now()}_${file.originalname}`;
+        await this.storageService.uploadFile(bucket, path, file.buffer, file.mimetype);
+        const publicUrl = this.storageService.getPublicUrl(bucket, path);
+        await this.userService.updateResumeUrl(userId, publicUrl);
+        return { url: publicUrl, filename: file.originalname, mimetype: file.mimetype };
+    } catch (error) {
+        throw new BadRequestException('Upload failed: ' + error.message);
+    }
 }
 
   @Post('upload-image')
@@ -76,19 +88,31 @@ async uploadImage(
   @UploadedFile() file: Multer.File,
   @Body('userId') userId: string
 ) {
+  if (!file) {
+    throw new BadRequestException('File is required');
+  }
+
+  if (!userId) {
+    throw new BadRequestException('User ID is required');
+  }
+
   // Validate file type (allow only JPG, PNG, SVG)
   const allowedMimeTypes = ['image/jpeg', 'image/png', 'image/svg+xml'];
   
   if (!allowedMimeTypes.includes(file.mimetype)) {
-    throw new Error('Only JPG, PNG, and SVG images are allowed');
+    throw new BadRequestException('Only JPG, PNG, and SVG images are allowed');
   }
   
-  const bucket = 'images';
-  const path = `${userId}/${Date.now()}_${file.originalname}`;
-  await this.storageService.uploadFile(bucket, path, file.buffer, file.mimetype);
-  const publicUrl = this.storageService.getPublicUrl(bucket, path);
-  await this.userService.updateImageUrl(userId, publicUrl);
-  return { url: publicUrl, filename: file.originalname, mimetype: file.mimetype };
+  try {
+    const bucket = 'images';
+    const path = `${userId}/${Date.now()}_${file.originalname}`;
+    await this.storageService.uploadFile(bucket, path, file.buffer, file.mimetype);
+    const publicUrl = this.storageService.getPublicUrl(bucket, path);
+    await this.userService.updateImageUrl(userId, publicUrl);
+    return { url: publicUrl, filename: file.originalname, mimetype: file.mimetype };
+  } catch (error) {
+    throw new BadRequestException('Upload failed: ' + error.message);
+  }
 }
 
   @Get('fetch')
@@ -128,7 +152,12 @@ async uploadImage(
     
     try {
       // Convert base64 to buffer
-      const fileBuffer = Buffer.from(base64Data, 'base64');
+      let fileBuffer;
+      try {
+        fileBuffer = Buffer.from(base64Data, 'base64');
+      } catch (e) {
+        throw new BadRequestException('Invalid base64 data format');
+      }
       
       const bucket = 'resumes';
       const path = `${uploadDto.userId}/${Date.now()}_${uploadDto.filename}`;
@@ -142,7 +171,10 @@ async uploadImage(
         mimetype: uploadDto.mimetype
       };
     } catch (error) {
-      throw new BadRequestException('Invalid base64 data or upload failed: ' + error.message);
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
+      throw new BadRequestException('Upload failed: ' + error.message);
     }
   }
 
@@ -169,7 +201,12 @@ async uploadImage(
     
     try {
       // Convert base64 to buffer
-      const fileBuffer = Buffer.from(base64Data, 'base64');
+      let fileBuffer;
+      try {
+        fileBuffer = Buffer.from(base64Data, 'base64');
+      } catch (e) {
+        throw new BadRequestException('Invalid base64 data format');
+      }
       
       const bucket = 'images';
       const path = `${uploadDto.userId}/${Date.now()}_${uploadDto.filename}`;
@@ -183,7 +220,10 @@ async uploadImage(
         mimetype: uploadDto.mimetype
       };
     } catch (error) {
-      throw new BadRequestException('Invalid base64 data or upload failed: ' + error.message);
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
+      throw new BadRequestException('Upload failed: ' + error.message);
     }
   }
 }
