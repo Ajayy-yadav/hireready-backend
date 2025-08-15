@@ -17,10 +17,10 @@ datasource db {
 model User {
   id          String   @id @default(uuid())
   email       String   @unique
-  imageUrl    String?
+  imageKey    String? // Store S3 key for profile image
   username    String
   currentRole String
-  resumeUrl   String?
+  resumeKey   String? // Store S3 key for resume
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 

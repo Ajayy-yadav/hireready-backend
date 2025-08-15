@@ -40,17 +40,17 @@ export class UserService {
   }
 
 
-async updateResumeUrl(userId: string, resumeUrl: string) {
+async updateResumeKey(userId: string, resumeKey: string) {
   return this.prisma.user.update({
     where: { id: userId },
-    data: { resumeUrl },
+    data: { resumeKey },
   });
 }
 
-async updateImageUrl(userId: string, imageUrl: string) {
+async updateImageKey(userId: string, imageKey: string) {
   return this.prisma.user.update({
     where: { id: userId },
-    data: { imageUrl },
+    data: { imageKey },
   });
 }
 }

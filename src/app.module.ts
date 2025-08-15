@@ -5,10 +5,9 @@ import { JwtAuthGuard } from './auth/jwt-auth.guard';
 import { APP_GUARD } from '@nestjs/core';
 import { UserModule } from './user/user.module';
 import { PrismaService } from './prisma/prisma.service';
-import { SupabaseModule } from './supabase/supabase-storage-module';
-
+import { AwsModule } from './aws/aws.module';
 @Module({
-  imports: [PrismaModule, UserModule, SupabaseModule],
+  imports: [PrismaModule, UserModule, AwsModule],
   controllers: [AppController],
   providers: [
     PrismaService,
