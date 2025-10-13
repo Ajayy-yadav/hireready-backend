@@ -491,7 +491,7 @@ export class InterviewService {
         sessionId,
         feedback,
         totalQuestions: session.totalQuestions,
-        completedQuestions: Math.floor(history.length / 2), // Approximate (each Q&A pair)
+        completedQuestions: Math.floor(history.length / 2), 
         status: session.status,
         cached: false,
       };
