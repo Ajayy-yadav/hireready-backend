@@ -15,14 +15,33 @@ datasource db {
 }
 
 model User {
-  id          String   @id @default(uuid())
-  email       String   @unique
+  id          String             @id @default(uuid())
+  email       String             @unique
   imageKey    String? // Store S3 key for profile image
   username    String
   currentRole String
   resumeKey   String? // Store S3 key for resume
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  interviews  InterviewSession[]
 
   @@map("users")
+}
+
+model InterviewSession {
+  id              String    @id @default(uuid())
+  userId          String
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  jobDescription  String    @db.Text
+  status          String    @default("in_progress") // in_progress, completed, cancelled
+  currentQuestion Int       @default(0)
+  totalQuestions  Int       @default(5)
+  history         Json      @default("[]") // Array of {role: string, content: string}
+  metadata        Json      @default("{}") // Store pre-generated questions and other data
+  startedAt       DateTime  @default(now())
+  completedAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@map("interview_sessions")
 }

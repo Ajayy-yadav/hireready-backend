@@ -8,6 +8,7 @@ import { UserModule } from './user/user.module';
 import { PrismaService } from './prisma/prisma.service';
 import { AwsModule } from './aws/aws.module';
 import { ResumeAnalysisModule } from './resume-analysis/resume-analysis.module';
+import { InterviewModule } from './ai-interview/interview.module';
 
 @Module({
   imports: [
@@ -17,7 +18,8 @@ import { ResumeAnalysisModule } from './resume-analysis/resume-analysis.module';
     PrismaModule, 
     UserModule, 
     AwsModule,
-    ResumeAnalysisModule
+    ResumeAnalysisModule,
+    InterviewModule,
   ],
   controllers: [AppController],
   providers: [
