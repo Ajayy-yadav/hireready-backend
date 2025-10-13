@@ -126,4 +126,87 @@ Format:
     const completion = await response.json();
     return completion.choices[0]?.message?.content;
   }
+
+  /**
+   * Generate comprehensive interview feedback based on conversation history
+   */
+  async generateInterviewFeedback(
+    jobDesc: string,
+    history: Array<{ role: string; content: string }>
+  ): Promise<{
+    overallScore: number;
+    strengths: string[];
+    areasForImprovement: string[];
+    detailedFeedback: string;
+    recommendations: string[];
+  }> {
+    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${this.openRouterApiKey}`,
+        'HTTP-Referer': 'http://localhost:3001',
+        'X-Title': 'HireReady Backend',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'openai/gpt-3.5-turbo',
+        messages: [
+          {
+            role: 'system',
+            content: `You are an expert interview evaluator. Analyze the interview conversation and provide comprehensive feedback.
+
+Your response MUST be a valid JSON object with this exact structure:
+{
+  "overallScore": <number 1-10>,
+  "strengths": ["strength 1", "strength 2", "strength 3"],
+  "areasForImprovement": ["area 1", "area 2", "area 3"],
+  "detailedFeedback": "A detailed paragraph analyzing the candidate's performance",
+  "recommendations": ["recommendation 1", "recommendation 2", "recommendation 3"]
+}
+
+Evaluate based on:
+- Technical knowledge and accuracy
+- Communication clarity
+- Problem-solving approach
+- Relevance to job requirements
+- Confidence and professionalism`,
+          },
+          { 
+            role: 'user', 
+            content: `Job Description:\n${jobDesc}\n\nInterview Conversation:\n${JSON.stringify(history, null, 2)}\n\nProvide detailed feedback in JSON format.` 
+          },
+        ],
+        temperature: 0.7,
+        max_tokens: 1000,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`OpenRouter API error: ${response.status} ${response.statusText}`);
+    }
+
+    const completion = await response.json();
+    const content = completion.choices[0]?.message?.content || '{}';
+    
+    try {
+      // Try to parse the JSON response
+      const feedback = JSON.parse(content);
+      
+      // Validate structure
+      if (!feedback.overallScore || !feedback.strengths || !feedback.areasForImprovement) {
+        throw new Error('Invalid feedback structure');
+      }
+      
+      return feedback;
+    } catch (parseError) {
+      // Fallback if JSON parsing fails
+      return {
+        overallScore: 7,
+        strengths: ['Completed the interview', 'Provided responses to questions'],
+        areasForImprovement: ['More detailed answers needed', 'Better technical depth'],
+        detailedFeedback: content,
+        recommendations: ['Practice technical concepts', 'Work on communication skills'],
+      };
+    }
+  }
 }

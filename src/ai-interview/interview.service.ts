@@ -1,10 +1,12 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { SttService } from '../stt/stt.service';
 import { TtsService } from '../tts/tts.service';
 import { LlmService } from '../llm/llm.service';
+import { AwsService } from '../aws/awsClient.service';
 import { StartInterviewDto } from './dto/start-interview.dto';
 import { ConversationHistory } from './dto/interview-message.dto';
+import * as crypto from 'crypto';
 
 @Injectable()
 export class InterviewService {
@@ -15,6 +17,7 @@ export class InterviewService {
     private sttService: SttService,
     private ttsService: TtsService,
     private llmService: LlmService,
+    private awsService: AwsService,
   ) {}
 
   /**
@@ -342,6 +345,242 @@ export class InterviewService {
     }
 
     return (session.history as any[]) || [];
+  }
+
+  /**
+   * Upload interview recording video to S3
+   */
+  async uploadInterviewRecording(
+    sessionId: string,
+    video: Express.Multer.File,
+  ) {
+    try {
+      // Check if session exists
+      const session = await this.prisma.interviewSession.findUnique({
+        where: { id: sessionId },
+      });
+
+      if (!session) {
+        throw new NotFoundException('Interview session not found');
+      }
+
+      // Generate file extension
+      const fileExtension = this.getFileExtension(
+        video.originalname,
+        video.mimetype,
+      );
+      const s3Key = `interview-recordings/${sessionId}/${crypto.randomUUID()}${fileExtension}`;
+
+      this.logger.log(`Uploading video to S3: ${s3Key}`);
+
+      // Upload to S3
+      const uploadResult = await this.awsService.uploadFile(
+        s3Key,
+        video.buffer,
+        video.mimetype,
+      );
+
+      // Update session with video key
+      await this.prisma.interviewSession.update({
+        where: { id: sessionId },
+        data: { videoRecordingKey: uploadResult.key },
+      });
+
+      this.logger.log(`Video uploaded successfully: ${s3Key}`);
+
+      return {
+        sessionId,
+        videoKey: uploadResult.key,
+        message: 'Video uploaded successfully',
+      };
+    } catch (error) {
+      this.logger.error(
+        `Error uploading interview recording: ${error.message}`,
+        error.stack,
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Get interview video signed URL
+   */
+  async getInterviewVideo(sessionId: string) {
+    try {
+      const session = await this.prisma.interviewSession.findUnique({
+        where: { id: sessionId },
+      });
+
+      if (!session) {
+        throw new NotFoundException('Interview session not found');
+      }
+
+      if (!session.videoRecordingKey) {
+        throw new NotFoundException('No video recording found for this interview');
+      }
+
+      // Generate signed URL (valid for 1 hour)
+      const signedUrl = await this.awsService.generateShortLivedSignedUrl(
+        session.videoRecordingKey,
+        3600,
+      );
+
+      return {
+        sessionId,
+        videoUrl: signedUrl,
+        expiresIn: 3600,
+      };
+    } catch (error) {
+      this.logger.error(
+        `Error getting interview video: ${error.message}`,
+        error.stack,
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Generate AI feedback based on interview history
+   */
+  async generateInterviewFeedback(sessionId: string) {
+    try {
+      const session = await this.prisma.interviewSession.findUnique({
+        where: { id: sessionId },
+      });
+
+      if (!session) {
+        throw new NotFoundException('Interview session not found');
+      }
+
+      // Check if feedback already exists (return cached feedback)
+      if (session.feedback && typeof session.feedback === 'object') {
+        this.logger.log(`Returning cached feedback for session ${sessionId}`);
+        return {
+          sessionId,
+          feedback: session.feedback,
+          totalQuestions: session.totalQuestions,
+          completedQuestions: Math.floor((session.history as any[]).length / 2),
+          status: session.status,
+          cached: true,
+        };
+      }
+
+      const history = (session.history as any[]) || [];
+
+      if (history.length === 0) {
+        throw new Error('No interview history available for feedback');
+      }
+
+      this.logger.log(`Generating feedback for ${history.length} messages`);
+
+      // Generate comprehensive feedback using LLM
+      const feedback = await this.llmService.generateInterviewFeedback(
+        session.jobDescription,
+        history,
+      );
+
+      // Store feedback in database
+      await this.prisma.interviewSession.update({
+        where: { id: sessionId },
+        data: { feedback },
+      });
+
+      this.logger.log(`Feedback generated and stored for session ${sessionId}`);
+
+      return {
+        sessionId,
+        feedback,
+        totalQuestions: session.totalQuestions,
+        completedQuestions: Math.floor(history.length / 2), // Approximate (each Q&A pair)
+        status: session.status,
+        cached: false,
+      };
+    } catch (error) {
+      this.logger.error(
+        `Error generating feedback: ${error.message}`,
+        error.stack,
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Get all completed interviews for a user
+   */
+  async getCompletedInterviews(userId: string) {
+    try {
+      const completedInterviews = await this.prisma.interviewSession.findMany({
+        where: {
+          userId,
+          status: 'completed',
+        },
+        orderBy: {
+          completedAt: 'desc',
+        },
+        select: {
+          id: true,
+          jobDescription: true,
+          status: true,
+          totalQuestions: true,
+          currentQuestion: true,
+          videoRecordingKey: true,
+          history: true,
+          feedback: true,
+          startedAt: true,
+          completedAt: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      });
+
+      this.logger.log(`Found ${completedInterviews.length} completed interviews for user ${userId}`);
+
+      return {
+        userId,
+        totalInterviews: completedInterviews.length,
+        interviews: completedInterviews.map((interview) => ({
+          sessionId: interview.id,
+          jobDescription: interview.jobDescription,
+          totalQuestions: interview.totalQuestions,
+          answeredQuestions: interview.currentQuestion - 1,
+          history: interview.history,
+          feedback: interview.feedback,
+          hasFeedback: !!interview.feedback,
+          hasVideoRecording: !!interview.videoRecordingKey,
+          startedAt: interview.startedAt,
+          completedAt: interview.completedAt,
+          duration: interview.completedAt && interview.startedAt
+            ? Math.floor((interview.completedAt.getTime() - interview.startedAt.getTime()) / 1000 / 60) // Duration in minutes
+            : null,
+        })),
+      };
+    } catch (error) {
+      this.logger.error(
+        `Error fetching completed interviews: ${error.message}`,
+        error.stack,
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Helper: Get file extension from filename or mimetype
+   */
+  private getFileExtension(filename: string, mimetype: string): string {
+    if (filename && filename.includes('.')) {
+      return filename.substring(filename.lastIndexOf('.'));
+    }
+
+    const mimetypeMap: { [key: string]: string } = {
+      'video/mp4': '.mp4',
+      'video/webm': '.webm',
+      'video/ogg': '.ogg',
+      'video/quicktime': '.mov',
+      'video/x-msvideo': '.avi',
+      'video/x-matroska': '.mkv',
+    };
+
+    return mimetypeMap[mimetype] || '.mp4';
   }
 }
 
