@@ -1,5 +1,6 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { PrismaService } from '../prisma/prisma.service';
 import * as pdfParse from 'pdf-parse';
 import * as mammoth from 'mammoth';
 import { ResumeAnalysisResponseDto } from './dto/resume-analysis.dto';
@@ -8,7 +9,10 @@ import { ResumeAnalysisResponseDto } from './dto/resume-analysis.dto';
 export class ResumeAnalysisService {
   private openRouterApiKey: string;
 
-  constructor(private configService: ConfigService) {
+  constructor(
+    private configService: ConfigService,
+    private prisma: PrismaService,
+  ) {
     const apiKey = this.configService.get<string>('OPENROUTER_API_KEY');
     if (!apiKey) {
       throw new Error('OPENAI_API_KEY environment variable is required');
@@ -35,7 +39,7 @@ export class ResumeAnalysisService {
     }
   }
 
-  async analyzeResume(resumeContent: string, jobDescription: string): Promise<ResumeAnalysisResponseDto> {
+  async analyzeResume(resumeContent: string, jobDescription: string, userId?: string): Promise<ResumeAnalysisResponseDto> {
     try {
       const prompt = `
 You are an expert HR analyst. Analyze the following resume against the job description and provide a JSON response with:
@@ -127,6 +131,18 @@ Be encouraging and professional in your motivational description. Highlight thei
         ) {
           console.log('Validation failed for:', analysisResult);
           throw new Error('Invalid response format from AI');
+        }
+
+        // Save latest score to user table (if userId provided)
+        if (userId) {
+          await this.prisma.user.update({
+            where: { id: userId },
+            data: {
+              latestResumeScore: analysisResult.compatibilityScore,
+              lastResumeAnalysisAt: new Date(),
+            },
+          });
+          console.log(`Updated user ${userId} with resume score: ${analysisResult.compatibilityScore}`);
         }
 
         return analysisResult;

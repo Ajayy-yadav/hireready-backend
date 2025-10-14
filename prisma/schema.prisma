@@ -15,15 +15,20 @@ datasource db {
 }
 
 model User {
-  id          String             @id @default(uuid())
-  email       String             @unique
-  imageKey    String? // Store S3 key for profile image
-  username    String
-  currentRole String
-  resumeKey   String? // Store S3 key for resume
-  createdAt   DateTime           @default(now())
-  updatedAt   DateTime           @updatedAt
-  interviews  InterviewSession[]
+  id                       String             @id @default(uuid())
+  email                    String             @unique
+  imageKey                 String? // Store S3 key for profile image
+  username                 String
+  currentRole              String
+  resumeKey                String? // Store S3 key for resume
+  latestResumeScore        Int? // Latest resume compatibility score (0-100)
+  latestInterviewScore     Int? // Latest interview overall score (0-100)
+  totalInterviews          Int                @default(0) // Count of completed interviews
+  lastResumeAnalysisAt     DateTime? // Timestamp of last resume analysis
+  lastInterviewCompletedAt DateTime? // Timestamp of last completed interview
+  createdAt                DateTime           @default(now())
+  updatedAt                DateTime           @updatedAt
+  interviews               InterviewSession[]
 
   @@map("users")
 }
@@ -40,6 +45,7 @@ model InterviewSession {
   metadata          Json      @default("{}") // Store pre-generated questions and other data
   videoRecordingKey String? // Store S3 key for interview recording video
   feedback          Json? // Store AI-generated feedback {overallScore, strengths, areasForImprovement, detailedFeedback, recommendations}
+  feedbackCounted   Boolean   @default(false) // Track if this interview was counted in user's totalInterviews
   startedAt         DateTime  @default(now())
   completedAt       DateTime?
   createdAt         DateTime  @default(now())

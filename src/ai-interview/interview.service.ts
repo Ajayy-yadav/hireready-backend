@@ -479,11 +479,40 @@ export class InterviewService {
         history,
       );
 
-      // Store feedback in database
+      // Store feedback in database and mark as counted
       await this.prisma.interviewSession.update({
         where: { id: sessionId },
-        data: { feedback },
+        data: { 
+          feedback,
+          feedbackCounted: true,
+        },
       });
+
+      // Update user's latest interview score and increment total interviews (only first time)
+      const scoreOutOf100 = Math.round((feedback.overallScore / 10) * 100); // Convert 1-10 to 0-100
+      
+      // Only increment totalInterviews if this interview hasn't been counted yet
+      if (!session.feedbackCounted) {
+        await this.prisma.user.update({
+          where: { id: session.userId },
+          data: {
+            latestInterviewScore: scoreOutOf100,
+            totalInterviews: { increment: 1 },
+            lastInterviewCompletedAt: new Date(),
+          },
+        });
+        this.logger.log(`Updated user ${session.userId} - Score: ${scoreOutOf100}/100, Total interviews incremented`);
+      } else {
+        // Just update the score, don't increment
+        await this.prisma.user.update({
+          where: { id: session.userId },
+          data: {
+            latestInterviewScore: scoreOutOf100,
+            lastInterviewCompletedAt: new Date(),
+          },
+        });
+        this.logger.log(`Updated user ${session.userId} - Score: ${scoreOutOf100}/100 (already counted)`);
+      }
 
       this.logger.log(`Feedback generated and stored for session ${sessionId}`);
 
@@ -546,6 +575,7 @@ export class InterviewService {
           history: interview.history,
           feedback: interview.feedback,
           hasFeedback: !!interview.feedback,
+          recordingKey: interview.videoRecordingKey,
           hasVideoRecording: !!interview.videoRecordingKey,
           startedAt: interview.startedAt,
           completedAt: interview.completedAt,

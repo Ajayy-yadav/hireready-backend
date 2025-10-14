@@ -5,6 +5,7 @@ import {
   UploadedFile,
   Body,
   BadRequestException,
+  Param,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiOperation, ApiConsumes, ApiResponse, ApiBody } from '@nestjs/swagger';
@@ -16,7 +17,7 @@ import { ResumeAnalysisRequestDto, ResumeAnalysisResponseDto } from './dto/resum
 export class ResumeAnalysisController {
   constructor(private readonly resumeAnalysisService: ResumeAnalysisService) {}
 
-  @Post('analyze')
+  @Post('analyze/:userId')
   @UseInterceptors(FileInterceptor('resume'))
   @ApiOperation({
     summary: 'Analyze resume against job description',
@@ -53,6 +54,7 @@ export class ResumeAnalysisController {
     description: 'Bad request - Invalid file format or missing data',
   })
   async analyzeResume(
+    @Param('userId') userId: string,
     @UploadedFile() resume: Express.Multer.File,
     @Body() jobDescriptionDto: ResumeAnalysisRequestDto,
   ): Promise<ResumeAnalysisResponseDto> {
@@ -93,7 +95,8 @@ export class ResumeAnalysisController {
       // Analyze resume against job description
       const analysisResult = await this.resumeAnalysisService.analyzeResume(
         resumeContent,
-        jobDescriptionDto.jobDescription
+        jobDescriptionDto.jobDescription,
+        userId  // Pass userId to save in user table
       );
 
       return analysisResult;
