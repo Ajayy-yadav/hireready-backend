@@ -26,8 +26,6 @@ export class InterviewService {
   async startInterview(dto: StartInterviewDto) {
     try {
       const totalQuestions = dto.totalQuestions || 5;
-
-      this.logger.log(`🚀 Generating all ${totalQuestions} questions upfront...`);
       
       // Generate ALL questions at once (single LLM call!)
       const allQuestions = await this.llmService.generateAllQuestions(
@@ -35,28 +33,20 @@ export class InterviewService {
         totalQuestions,
       );
 
-      this.logger.log(`✅ Generated ${allQuestions.length} questions in one call!`);
-
       // Create session with pre-generated questions
       const session = await this.prisma.interviewSession.create({
         data: {
           userId: dto.userId,
           jobDescription: dto.jobDescription,
           totalQuestions,
-          currentQuestion: 1, // Start at 1 since we're showing the first question
+          currentQuestion: 1,
           status: 'in_progress',
-          history: [],
-          // Store questions in metadata for quick access
+          history: [{ role: 'assistant', content: allQuestions[0] }], // Initialize with first question
           metadata: {
             questions: allQuestions,
           },
         },
       });
-
-      this.logger.log(`Interview session started: ${session.id}`);
-
-      // Add first question to history
-      await this.addToHistory(session.id, 'assistant', allQuestions[0]);
 
       return {
         sessionId: session.id,
@@ -75,13 +65,7 @@ export class InterviewService {
    */
   async processTranscript(sessionId: string, userAnswer: string) {
     try {
-      this.logger.log(`⚡ Processing transcript for session: ${sessionId}`);
-      this.logger.log(`Answer: ${userAnswer}`);
-
-      // Step 1: Save user answer to history
-      await this.addToHistory(sessionId, 'user', userAnswer);
-
-      // Step 2: Update session progress
+      // Fetch session and update in one operation
       const session = await this.prisma.interviewSession.findUnique({
         where: { id: sessionId },
       });
@@ -90,27 +74,22 @@ export class InterviewService {
         throw new Error('Interview session not found');
       }
 
-      const updatedSession = await this.prisma.interviewSession.update({
-        where: { id: sessionId },
-        data: {
-          currentQuestion: session.currentQuestion + 1,
-        },
-      });
-      
-      this.logger.log(`✅ Progress: ${updatedSession.currentQuestion}/${updatedSession.totalQuestions}`);
+      const nextQuestionNum = session.currentQuestion + 1;
+      const isComplete = nextQuestionNum > session.totalQuestions;
 
-      // Step 3: Check if interview is complete
-      // currentQuestion represents the question we're NOW on (after answering previous)
-      // So we're complete when currentQuestion EXCEEDS totalQuestions
-      const isComplete = updatedSession.currentQuestion > updatedSession.totalQuestions;
+      // Prepare history update
+      const history = (session.history as any[]) || [];
+      history.push({ role: 'user', content: userAnswer });
 
       if (isComplete) {
-        this.logger.log('🎉 Interview complete!');
+        // Complete interview - single DB update
         await this.prisma.interviewSession.update({
           where: { id: sessionId },
           data: {
+            currentQuestion: nextQuestionNum,
             status: 'completed',
             completedAt: new Date(),
+            history,
           },
         });
         
@@ -118,23 +97,20 @@ export class InterviewService {
           transcript: userAnswer,
           question: null,
           questionAudio: null,
-          currentQuestion: updatedSession.currentQuestion,
-          totalQuestions: updatedSession.totalQuestions,
+          currentQuestion: nextQuestionNum,
+          totalQuestions: session.totalQuestions,
           isComplete: true,
         };
       }
 
-      // Step 4: Get pre-generated next question (NO LLM CALL!)
-      const metadata = updatedSession.metadata as any;
+      // Get pre-generated next question
+      const metadata = session.metadata as any;
       const preGeneratedQuestions = metadata?.questions || [];
-      
-      // Current question index (0-based)
-      const nextQuestionIndex = updatedSession.currentQuestion - 1;
+      const nextQuestionIndex = nextQuestionNum - 1;
       const nextQuestion = preGeneratedQuestions[nextQuestionIndex];
 
       if (!nextQuestion) {
         this.logger.error('No pre-generated question found, falling back to LLM');
-        // Fallback to old method if questions weren't pre-generated
         const generatedQuestion = await this.generateNextQuestion(sessionId);
         const questionAudio = await this.ttsService.textToSpeech(generatedQuestion);
         
@@ -142,31 +118,34 @@ export class InterviewService {
           transcript: userAnswer,
           question: generatedQuestion,
           questionAudio,
-          currentQuestion: updatedSession.currentQuestion,
-          totalQuestions: updatedSession.totalQuestions,
+          currentQuestion: nextQuestionNum,
+          totalQuestions: session.totalQuestions,
           isComplete: false,
         };
       }
 
-      this.logger.log(`⚡ Using pre-generated question (no LLM delay!): ${nextQuestion.substring(0, 50)}...`);
+      // Add next question to history
+      history.push({ role: 'assistant', content: nextQuestion });
 
-      // Add to history
-      await this.addToHistory(sessionId, 'assistant', nextQuestion);
-
-      // Step 5: Convert question to speech using TTS (only delay now!)
-      const questionAudio = await this.ttsService.textToSpeech(nextQuestion);
-      this.logger.log(`✅ Audio generated, size: ${questionAudio.length} bytes`);
+      // Optimize: Start TTS generation and DB update in parallel
+      const [questionAudio] = await Promise.all([
+        this.ttsService.textToSpeech(nextQuestion),
+        this.prisma.interviewSession.update({
+          where: { id: sessionId },
+          data: { currentQuestion: nextQuestionNum, history },
+        }),
+      ]);
 
       return {
         transcript: userAnswer,
         question: nextQuestion,
         questionAudio,
-        currentQuestion: updatedSession.currentQuestion,
-        totalQuestions: updatedSession.totalQuestions,
+        currentQuestion: nextQuestionNum,
+        totalQuestions: session.totalQuestions,
         isComplete: false,
       };
     } catch (error) {
-      this.logger.error(`❌ Error in processTranscript: ${error.message}`, error.stack);
+      this.logger.error(`Error in processTranscript: ${error.message}`, error.stack);
       throw error;
     }
   }
@@ -177,10 +156,6 @@ export class InterviewService {
    */
   async processAudioInput(sessionId: string, audioBuffer: Buffer) {
     try {
-      this.logger.log(`Processing audio for session: ${sessionId}, size: ${audioBuffer.length} bytes`);
-
-      // Step 1: Transcribe audio using STT
-      this.logger.log('Step 1: Starting STT transcription...');
       const transcriptionResult = await this.sttService.transcribeFromFile(audioBuffer);
       const userAnswer = this.sttService.extractTranscript(transcriptionResult);
 
@@ -189,80 +164,9 @@ export class InterviewService {
         throw new Error('No speech detected in audio');
       }
 
-      this.logger.log(`Step 1 Complete: Transcribed answer: ${userAnswer}`);
-
-      // Step 2: Save user answer to history
-      this.logger.log('Step 2: Saving answer to history...');
-      await this.addToHistory(sessionId, 'user', userAnswer);
-      this.logger.log('Step 2 Complete: Answer saved');
-
-      // Step 3: Update session progress FIRST
-      this.logger.log('Step 3: Updating session progress...');
-      const session = await this.prisma.interviewSession.findUnique({
-        where: { id: sessionId },
-      });
-
-      if (!session) {
-        this.logger.error(`Session not found: ${sessionId}`);
-        throw new Error('Interview session not found');
-      }
-
-      const updatedSession = await this.prisma.interviewSession.update({
-        where: { id: sessionId },
-        data: {
-          currentQuestion: session.currentQuestion + 1,
-        },
-      });
-      
-      this.logger.log(`Step 3 Complete: Progress updated to ${updatedSession.currentQuestion}/${updatedSession.totalQuestions}`);
-
-      // Step 4: Check if interview is complete BEFORE generating next question
-      const isComplete = updatedSession.currentQuestion >= updatedSession.totalQuestions;
-
-      if (isComplete) {
-        this.logger.log('Interview complete! No more questions to generate. Marking as completed...');
-        await this.prisma.interviewSession.update({
-          where: { id: sessionId },
-          data: {
-            status: 'completed',
-            completedAt: new Date(),
-          },
-        });
-        this.logger.log(`Interview session completed: ${sessionId}`);
-        
-        // Return without generating next question
-        return {
-          transcript: userAnswer,
-          question: null, // No next question
-          questionAudio: null, // No audio
-          currentQuestion: updatedSession.currentQuestion,
-          totalQuestions: updatedSession.totalQuestions,
-          isComplete: true,
-        };
-      }
-
-      // Step 5: Generate next question using LLM (only if not complete)
-      this.logger.log('Step 4: Generating next question with LLM...');
-      const nextQuestion = await this.generateNextQuestion(sessionId);
-      this.logger.log(`Step 4 Complete: Generated question: ${nextQuestion.substring(0, 50)}...`);
-
-      // Step 6: Convert question to speech using TTS
-      this.logger.log('Step 5: Converting question to speech...');
-      const questionAudio = await this.ttsService.textToSpeech(nextQuestion);
-      this.logger.log(`Step 5 Complete: Audio generated, size: ${questionAudio.length} bytes`);
-
-      this.logger.log('All steps complete! Returning result...');
-
-      return {
-        transcript: userAnswer,
-        question: nextQuestion,
-        questionAudio,
-        currentQuestion: updatedSession.currentQuestion,
-        totalQuestions: updatedSession.totalQuestions,
-        isComplete: false,
-      };
+      return await this.processTranscript(sessionId, userAnswer);
     } catch (error) {
-      this.logger.error(`❌ Error in processAudioInput: ${error.message}`, error.stack);
+      this.logger.error(`Error in processAudioInput: ${error.message}`, error.stack);
       throw error;
     }
   }
@@ -281,17 +185,10 @@ export class InterviewService {
       }
 
       const history = (session.history as any[]) || [];
-
-      // Get LLM response
       const question = await this.llmService.llmResponse(
         session.jobDescription,
         history as ConversationHistory[],
       );
-
-      // Save assistant question to history
-      await this.addToHistory(sessionId, 'assistant', question);
-
-      this.logger.log(`Generated question: ${question}`);
 
       return question;
     } catch (error) {
@@ -324,8 +221,6 @@ export class InterviewService {
         where: { id: sessionId },
         data: { history },
       });
-
-      this.logger.debug(`Added to history [${role}]: ${content.substring(0, 50)}...`);
     } catch (error) {
       this.logger.error(`Error adding to history: ${error.message}`, error.stack);
       throw error;
@@ -355,7 +250,6 @@ export class InterviewService {
     video: Express.Multer.File,
   ) {
     try {
-      // Check if session exists
       const session = await this.prisma.interviewSession.findUnique({
         where: { id: sessionId },
       });
@@ -364,29 +258,20 @@ export class InterviewService {
         throw new NotFoundException('Interview session not found');
       }
 
-      // Generate file extension
       const fileExtension = this.getFileExtension(
         video.originalname,
         video.mimetype,
       );
       const s3Key = `interview-recordings/${sessionId}/${crypto.randomUUID()}${fileExtension}`;
 
-      this.logger.log(`Uploading video to S3: ${s3Key}`);
-
-      // Upload to S3
-      const uploadResult = await this.awsService.uploadFile(
-        s3Key,
-        video.buffer,
-        video.mimetype,
-      );
-
-      // Update session with video key
-      await this.prisma.interviewSession.update({
-        where: { id: sessionId },
-        data: { videoRecordingKey: uploadResult.key },
-      });
-
-      this.logger.log(`Video uploaded successfully: ${s3Key}`);
+      // Upload to S3 and update DB in parallel
+      const [uploadResult] = await Promise.all([
+        this.awsService.uploadFile(s3Key, video.buffer, video.mimetype),
+        this.prisma.interviewSession.update({
+          where: { id: sessionId },
+          data: { videoRecordingKey: s3Key },
+        }),
+      ]);
 
       return {
         sessionId,
@@ -452,9 +337,8 @@ export class InterviewService {
         throw new NotFoundException('Interview session not found');
       }
 
-      // Check if feedback already exists (return cached feedback)
+      // Return cached feedback if available
       if (session.feedback && typeof session.feedback === 'object') {
-        this.logger.log(`Returning cached feedback for session ${sessionId}`);
         return {
           sessionId,
           feedback: session.feedback,
@@ -471,50 +355,50 @@ export class InterviewService {
         throw new Error('No interview history available for feedback');
       }
 
-      this.logger.log(`Generating feedback for ${history.length} messages`);
-
-      // Generate comprehensive feedback using LLM
       const feedback = await this.llmService.generateInterviewFeedback(
         session.jobDescription,
         history,
       );
 
-      // Store feedback in database and mark as counted
-      await this.prisma.interviewSession.update({
-        where: { id: sessionId },
-        data: { 
-          feedback,
-          feedbackCounted: true,
-        },
-      });
-
-      // Update user's latest interview score and increment total interviews (only first time)
-      const scoreOutOf100 = Math.round((feedback.overallScore / 10) * 100); // Convert 1-10 to 0-100
+      const scoreOutOf100 = Math.round((feedback.overallScore / 10) * 100);
       
-      // Only increment totalInterviews if this interview hasn't been counted yet
+      // Update session and user in parallel
       if (!session.feedbackCounted) {
-        await this.prisma.user.update({
-          where: { id: session.userId },
-          data: {
-            latestInterviewScore: scoreOutOf100,
-            totalInterviews: { increment: 1 },
-            lastInterviewCompletedAt: new Date(),
-          },
-        });
-        this.logger.log(`Updated user ${session.userId} - Score: ${scoreOutOf100}/100, Total interviews incremented`);
+        await Promise.all([
+          this.prisma.interviewSession.update({
+            where: { id: sessionId },
+            data: { 
+              feedback,
+              feedbackCounted: true,
+            },
+          }),
+          this.prisma.user.update({
+            where: { id: session.userId },
+            data: {
+              latestInterviewScore: scoreOutOf100,
+              totalInterviews: { increment: 1 },
+              lastInterviewCompletedAt: new Date(),
+            },
+          }),
+        ]);
       } else {
-        // Just update the score, don't increment
-        await this.prisma.user.update({
-          where: { id: session.userId },
-          data: {
-            latestInterviewScore: scoreOutOf100,
-            lastInterviewCompletedAt: new Date(),
-          },
-        });
-        this.logger.log(`Updated user ${session.userId} - Score: ${scoreOutOf100}/100 (already counted)`);
+        await Promise.all([
+          this.prisma.interviewSession.update({
+            where: { id: sessionId },
+            data: { 
+              feedback,
+              feedbackCounted: true,
+            },
+          }),
+          this.prisma.user.update({
+            where: { id: session.userId },
+            data: {
+              latestInterviewScore: scoreOutOf100,
+              lastInterviewCompletedAt: new Date(),
+            },
+          }),
+        ]);
       }
-
-      this.logger.log(`Feedback generated and stored for session ${sessionId}`);
 
       return {
         sessionId,
@@ -562,8 +446,6 @@ export class InterviewService {
         },
       });
 
-      this.logger.log(`Found ${completedInterviews.length} completed interviews for user ${userId}`);
-
       return {
         userId,
         totalInterviews: completedInterviews.length,
@@ -580,7 +462,7 @@ export class InterviewService {
           startedAt: interview.startedAt,
           completedAt: interview.completedAt,
           duration: interview.completedAt && interview.startedAt
-            ? Math.floor((interview.completedAt.getTime() - interview.startedAt.getTime()) / 1000 / 60) // Duration in minutes
+            ? Math.floor((interview.completedAt.getTime() - interview.startedAt.getTime()) / 1000 / 60)
             : null,
         })),
       };

@@ -45,8 +45,6 @@ export class SttService {
         utterances: true,
       };
 
-      this.logger.log(`Transcribing audio from URL with model: ${options.model}`);
-
       const { result, error } = await this.deepgramClient.listen.prerecorded.transcribeUrl(
         { url: audioUrl },
         options,
@@ -57,7 +55,6 @@ export class SttService {
         throw error;
       }
 
-      this.logger.log('Successfully transcribed audio from URL');
       return {
         results: result,
         metadata: result?.metadata,
@@ -84,8 +81,6 @@ export class SttService {
         utterances: true,
       };
 
-      this.logger.log(`Transcribing audio from file with model: ${options.model}`);
-
       const { result, error } = await this.deepgramClient.listen.prerecorded.transcribeFile(
         audioSource,
         options,
@@ -96,7 +91,6 @@ export class SttService {
         throw error;
       }
 
-      this.logger.log('Successfully transcribed audio from file');
       return {
         results: result,
         metadata: result?.metadata,
@@ -119,43 +113,30 @@ export class SttService {
         punctuate: true,
         smart_format: true,
         interim_results: true,
-        endpointing: 2000, // 2 seconds pause triggers UtteranceEnd
-        vad_events: true, // Enable Voice Activity Detection
-        utterance_end_ms: 2000, // 2 seconds of silence ends an utterance
-        // Let Deepgram auto-detect audio format from browser (WebM/Opus)
+        endpointing: 2000,
+        vad_events: true,
+        utterance_end_ms: 2000,
       };
-
-      this.logger.log(`Creating live transcription connection with model: ${options.model}`);
 
       const connection = this.deepgramClient.listen.live(options);
 
-      // Set up default event handlers for logging
       connection.on(LiveTranscriptionEvents.Open, () => {
-        this.logger.log('Live transcription connection opened');
-        
-        // Send keepalive every 5 seconds to prevent connection from closing
         const keepAliveInterval = setInterval(() => {
-          if (connection.getReadyState() === 1) { // 1 = OPEN
+          if (connection.getReadyState() === 1) {
             try {
               connection.keepAlive();
-              this.logger.debug('Sent keepalive to Deepgram');
             } catch (error) {
               this.logger.error(`Error sending keepalive: ${error.message}`);
             }
           } else {
-            this.logger.warn('Connection not open, stopping keepalive');
             clearInterval(keepAliveInterval);
           }
         }, 5000);
 
-        // Store interval for cleanup
         (connection as any)._keepAliveInterval = keepAliveInterval;
       });
 
       connection.on(LiveTranscriptionEvents.Close, () => {
-        this.logger.log('Live transcription connection closed');
-        
-        // Clear keepalive interval
         if ((connection as any)._keepAliveInterval) {
           clearInterval((connection as any)._keepAliveInterval);
         }
@@ -163,10 +144,6 @@ export class SttService {
 
       connection.on(LiveTranscriptionEvents.Error, (error) => {
         this.logger.error(`Live transcription error: ${JSON.stringify(error)}`);
-      });
-
-      connection.on(LiveTranscriptionEvents.Metadata, (metadata) => {
-        this.logger.debug(`Received metadata: ${JSON.stringify(metadata)}`);
       });
 
       return {
@@ -234,7 +211,6 @@ export class SttService {
     try {
       const channel = result.results?.results?.channels?.[0];
       const alternatives = channel?.alternatives?.[0];
-      this.logger.log(`Extracted words: ${JSON.stringify(alternatives?.words)}`);
       return alternatives?.words || [];
     } catch (error) {
       this.logger.error(`Error extracting words: ${error.message}`);

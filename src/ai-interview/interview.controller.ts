@@ -34,7 +34,6 @@ export class InterviewController {
       throw new BadRequestException('No video file uploaded');
     }
 
-    // Validate video types
     const allowedVideoTypes = [
       'video/mp4',
       'video/webm',
@@ -50,15 +49,10 @@ export class InterviewController {
       );
     }
 
-    // Validate file size (500MB limit for videos)
-    const maxSizeInBytes = 500 * 1024 * 1024; // 500MB
+    const maxSizeInBytes = 500 * 1024 * 1024;
     if (video.size > maxSizeInBytes) {
       throw new BadRequestException('Video size cannot exceed 500MB');
     }
-
-    this.logger.log(
-      `Uploading video for session ${sessionId}: ${video.originalname} (${video.size} bytes)`,
-    );
 
     return await this.interviewService.uploadInterviewRecording(
       sessionId,
@@ -71,25 +65,16 @@ export class InterviewController {
    */
   @Get(':sessionId/video')
   async getInterviewVideo(@Param('sessionId') sessionId: string) {
-    this.logger.log(`Getting video for session: ${sessionId}`);
     return await this.interviewService.getInterviewVideo(sessionId);
   }
 
-  /**
-   * Get AI-generated feedback based on interview history
-   */
   @Get(':sessionId/feedback')
   async getInterviewFeedback(@Param('sessionId') sessionId: string) {
-    this.logger.log(`Generating feedback for session: ${sessionId}`);
     return await this.interviewService.generateInterviewFeedback(sessionId);
   }
 
-  /**
-   * Get all completed interviews for a user
-   */
   @Get('user/:userId/completed')
   async getCompletedInterviews(@Param('userId') userId: string) {
-    this.logger.log(`Fetching completed interviews for user: ${userId}`);
     return await this.interviewService.getCompletedInterviews(userId);
   }
 }

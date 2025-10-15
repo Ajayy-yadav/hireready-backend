@@ -75,8 +75,6 @@ Format:
 
     // Ensure we have enough questions
     if (questions.length < totalQuestions) {
-      console.warn(`LLM only generated ${questions.length} questions, expected ${totalQuestions}`);
-      // Pad with generic questions if needed
       while (questions.length < totalQuestions) {
         questions.push(`Tell me more about your experience related to this role.`);
       }

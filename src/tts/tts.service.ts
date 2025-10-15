@@ -31,8 +31,6 @@ export class TtsService {
         container: 'wav',
       };
 
-      this.logger.log(`Converting text to speech with model: ${options.model}`);
-
       const response = await this.deepgramClient.speak.request(
         { text },
         options,
@@ -43,10 +41,7 @@ export class TtsService {
         throw new Error('Failed to get audio stream from Deepgram');
       }
 
-      // Convert ReadableStream to Buffer
       const audioBuffer = await this.streamToBuffer(stream);
-      
-      this.logger.log(`Successfully generated audio of size: ${audioBuffer.length} bytes`);
       return audioBuffer;
     } catch (error) {
       this.logger.error(`Error in textToSpeech: ${error.message}`, error.stack);
@@ -67,25 +62,10 @@ export class TtsService {
         container: 'wav',
       };
 
-      this.logger.log(`Creating streaming TTS connection with model: ${options.model}`);
-
       const connection = this.deepgramClient.speak.live(options);
-
-      // Set up event handlers
-      connection.on(LiveTTSEvents.Open, () => {
-        this.logger.log('Streaming TTS connection opened');
-      });
-
-      connection.on(LiveTTSEvents.Close, () => {
-        this.logger.log('Streaming TTS connection closed');
-      });
 
       connection.on(LiveTTSEvents.Error, (error) => {
         this.logger.error(`Streaming TTS error: ${error}`);
-      });
-
-      connection.on(LiveTTSEvents.Metadata, (metadata) => {
-        this.logger.debug(`Received metadata: ${JSON.stringify(metadata)}`);
       });
 
       return {
