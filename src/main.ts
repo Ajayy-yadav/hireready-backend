@@ -20,7 +20,7 @@ const document = SwaggerModule.createDocument(app, config);
   app.use(bodyParser.urlencoded({ limit: '10mb', extended: true }));
   app.enableCors({
     // Allow frontend (Next.js on port 3000)
-    origin: ["http://localhost:3000", "http://localhost:3001", "https://www.hireready.live"],
+    origin: ["http://localhost:3000", "http://localhost:3001", "https://www.hireready.live" , "https://hireready.live"],
     credentials: true,
     allowedHeaders: ['Content-Type', 'Authorization', 'cookie'],
   });
